@@ -42,6 +42,16 @@ ansible-galaxy collection install grafana.grafana
 
 ---
 
+## 👤 Maintainer
+
+This repository is maintained by Ranas Mukminov.
+
+**Contact and more information:** [run-as-daemon.ru](https://run-as-daemon.ru)
+
+Visit the website to find contact information and learn more about my work.
+
+---
+
 <p><img src="https://grafana.com/blog/assets/img/blog/timeshift/grafana_release_icon.png" alt="grafana logo" title="grafana" align="right" height="60" /></p>
 
 # Ansible Role: grafana
@@ -223,3 +233,7 @@ See [troubleshooting](TROUBLESHOOTING.md).
 ## License
 
 This project is licensed under MIT License. See [LICENSE](/LICENSE) for more details.
+
+---
+
+**Other languages:** **English** | [Русский](README.ru.md)
