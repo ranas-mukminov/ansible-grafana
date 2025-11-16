@@ -1,6 +1,46 @@
-# DEPRECATED
+# ⚠️ DEPRECATED - MIGRATION REQUIRED ⚠️
 
-**This role has been deprecated in favor of a the [grafana-ansible-collection](https://github.com/grafana/grafana-ansible-collection) collection.**
+**This role has been deprecated in favor of the official [grafana-ansible-collection](https://github.com/grafana/grafana-ansible-collection) collection.**
+
+## 🚨 Why You Should Migrate
+
+The official Grafana Ansible Collection provides:
+- ✅ **Active Support** from Grafana Labs
+- ✅ **Modern Grafana Support** (v9+, v10+, v11+)
+- ✅ **Grafana Cloud API** integration
+- ✅ **Additional Modules** for Alloy, Loki, Mimir, Tempo
+- ✅ **OpenTelemetry Collector** integration
+- ✅ **Better Security** and regular updates
+
+## 📖 Migration Guide
+
+See **[MIGRATION.md](MIGRATION.md)** for detailed step-by-step migration instructions.
+
+### Quick Start Migration
+
+```bash
+# Install the official collection
+ansible-galaxy collection install grafana.grafana
+
+# Update your playbooks
+- hosts: grafana
+  collections:
+    - grafana.grafana
+  roles:
+    - grafana.grafana.grafana
+  vars:
+    grafana_security:
+      admin_user: admin
+      admin_password: "{{ vault_grafana_password }}"
+```
+
+## 📚 Additional Resources
+
+- **[Container Deployments](examples/)** - Docker, Podman, and Kubernetes examples
+- **[Backup Scripts](scripts/)** - Automated backup and health check scripts
+- **[Reverse Proxy Setup](examples/nginx/)** - Nginx and Traefik configurations
+
+---
 
 <p><img src="https://grafana.com/blog/assets/img/blog/timeshift/grafana_release_icon.png" alt="grafana logo" title="grafana" align="right" height="60" /></p>
 

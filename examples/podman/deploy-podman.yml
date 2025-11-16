@@ -1,0 +1,178 @@
+---
+# Ansible playbook to deploy Grafana using Podman
+# Suitable for RHEL, Fedora, and Arch Linux systems
+#
+# Usage: ansible-playbook -i inventory deploy-podman.yml
+
+- name: Deploy Grafana with Podman
+  hosts: grafana_servers
+  become: true
+
+  vars:
+    grafana_container_name: grafana
+    grafana_pod_name: grafana-pod
+    grafana_port: 3000
+    grafana_admin_password: "{{ vault_grafana_password }}"
+    grafana_data_dir: /var/lib/grafana-containers
+    grafana_image: "docker.io/grafana/grafana:latest"
+
+  tasks:
+    - name: Install Podman
+      package:
+        name:
+          - podman
+          - podman-compose
+        state: present
+
+    - name: Create Grafana data directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+        owner: "472"  # Grafana container user
+        group: "472"
+      loop:
+        - "{{ grafana_data_dir }}/data"
+        - "{{ grafana_data_dir }}/provisioning/datasources"
+        - "{{ grafana_data_dir }}/provisioning/dashboards"
+        - "{{ grafana_data_dir }}/dashboards"
+
+    - name: Create Grafana pod
+      containers.podman.podman_pod:
+        name: "{{ grafana_pod_name }}"
+        state: started
+        ports:
+          - "{{ grafana_port }}:3000"
+        recreate: true
+
+    - name: Pull Grafana image
+      containers.podman.podman_image:
+        name: "{{ grafana_image }}"
+        state: present
+
+    - name: Run Grafana container in pod
+      containers.podman.podman_container:
+        name: "{{ grafana_container_name }}"
+        image: "{{ grafana_image }}"
+        state: started
+        pod: "{{ grafana_pod_name }}"
+        recreate: true
+        env:
+          GF_SECURITY_ADMIN_USER: "admin"
+          GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+          GF_INSTALL_PLUGINS: "grafana-piechart-panel,grafana-clock-panel"
+          GF_SERVER_ROOT_URL: "http://{{ ansible_host }}:{{ grafana_port }}"
+        volume:
+          - "{{ grafana_data_dir }}/data:/var/lib/grafana:Z"
+          - "{{ grafana_data_dir }}/provisioning:/etc/grafana/provisioning:Z"
+          - "{{ grafana_data_dir }}/dashboards:/var/lib/grafana/dashboards:Z"
+        healthcheck:
+          test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 40s
+
+    - name: Generate systemd unit files for Grafana pod
+      containers.podman.podman_generate_systemd:
+        name: "{{ grafana_pod_name }}"
+        dest: /etc/systemd/system/
+        restart_policy: always
+        new: true
+      register: systemd_unit
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: true
+      when: systemd_unit.changed
+
+    - name: Enable and start Grafana pod service
+      systemd:
+        name: "pod-{{ grafana_pod_name }}"
+        enabled: true
+        state: started
+
+    - name: Wait for Grafana to be ready
+      uri:
+        url: "http://localhost:{{ grafana_port }}/api/health"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Configure firewall for Grafana (firewalld)
+      firewalld:
+        port: "{{ grafana_port }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: true
+      when: ansible_os_family in ["RedHat", "Fedora"]
+      ignore_errors: true
+
+    - name: Display Grafana access information
+      debug:
+        msg:
+          - "Grafana is now running with Podman!"
+          - "Access URL: http://{{ ansible_host }}:{{ grafana_port }}"
+          - "Username: admin"
+          - "Password: {{ grafana_admin_password }}"
+          - "Systemd service: pod-{{ grafana_pod_name }}"
+          - "Management commands:"
+          - "  - Status: systemctl status pod-{{ grafana_pod_name }}"
+          - "  - Logs: journalctl -u pod-{{ grafana_pod_name }} -f"
+          - "  - Restart: systemctl restart pod-{{ grafana_pod_name }}"
+
+- name: Setup Podman Quadlet (systemd-native) - Alternative Method
+  hosts: grafana_servers
+  become: true
+  tags: quadlet
+
+  vars:
+    grafana_quadlet_dir: /etc/containers/systemd
+    grafana_admin_password: "{{ vault_grafana_password }}"
+
+  tasks:
+    - name: Create Quadlet directory
+      file:
+        path: "{{ grafana_quadlet_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create Grafana container unit (Quadlet)
+      copy:
+        dest: "{{ grafana_quadlet_dir }}/grafana.container"
+        content: |
+          [Unit]
+          Description=Grafana Monitoring Platform
+          After=network-online.target
+          Wants=network-online.target
+
+          [Container]
+          Image=docker.io/grafana/grafana:latest
+          PublishPort=3000:3000
+          Volume=/var/lib/grafana-data:/var/lib/grafana:Z
+          Environment=GF_SECURITY_ADMIN_USER=admin
+          Environment=GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password }}
+          Environment=GF_INSTALL_PLUGINS=grafana-piechart-panel
+          HealthCmd=curl -f http://localhost:3000/api/health || exit 1
+          HealthInterval=30s
+          HealthRetries=3
+
+          [Service]
+          Restart=always
+          TimeoutStartSec=900
+
+          [Install]
+          WantedBy=multi-user.target default.target
+        mode: '0644'
+
+    - name: Reload systemd to pick up Quadlet units
+      systemd:
+        daemon_reload: true
+
+    - name: Enable and start Grafana Quadlet service
+      systemd:
+        name: grafana
+        enabled: true
+        state: started

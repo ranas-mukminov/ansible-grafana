@@ -1,0 +1,129 @@
+---
+# Ansible playbook to configure Nginx reverse proxy for Grafana
+#
+# Usage: ansible-playbook -i inventory setup-nginx.yml
+
+- name: Configure Nginx Reverse Proxy for Grafana
+  hosts: grafana_servers
+  become: true
+
+  vars:
+    grafana_domain: grafana.example.com
+    grafana_backend: "127.0.0.1:3000"
+    nginx_ssl_cert_email: "admin@example.com"
+    enable_letsencrypt: true
+
+  tasks:
+    - name: Install Nginx
+      apt:
+        name:
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install Nginx (RedHat)
+      yum:
+        name:
+          - nginx
+          - certbot
+          - python3-certbot-nginx
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Ensure Nginx is started and enabled
+      systemd:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Create rate limiting configuration
+      blockinfile:
+        path: /etc/nginx/nginx.conf
+        insertafter: "http {"
+        block: |
+          # Rate limiting for Grafana API
+          limit_req_zone $binary_remote_addr zone=grafana_api:10m rate=10r/s;
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - Grafana Rate Limiting"
+      notify: reload nginx
+
+    - name: Copy Nginx configuration for Grafana
+      template:
+        src: grafana.conf.j2
+        dest: /etc/nginx/sites-available/grafana.conf
+        mode: '0644'
+      notify: reload nginx
+
+    - name: Enable Grafana Nginx site
+      file:
+        src: /etc/nginx/sites-available/grafana.conf
+        dest: /etc/nginx/sites-enabled/grafana.conf
+        state: link
+      notify: reload nginx
+      when: ansible_os_family == "Debian"
+
+    - name: Test Nginx configuration
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+
+    - name: Display Nginx test result
+      debug:
+        var: nginx_test.stderr_lines
+
+    - name: Obtain Let's Encrypt certificate
+      command: >
+        certbot --nginx
+        -d {{ grafana_domain }}
+        --email {{ nginx_ssl_cert_email }}
+        --agree-tos
+        --non-interactive
+        --redirect
+      when: enable_letsencrypt
+      register: certbot_result
+      changed_when: "'Certificate not yet due for renewal' not in certbot_result.stdout"
+
+    - name: Setup certbot renewal cron
+      cron:
+        name: "Renew Let's Encrypt certificates"
+        minute: "0"
+        hour: "3"
+        job: "certbot renew --quiet --post-hook 'systemctl reload nginx'"
+      when: enable_letsencrypt
+
+    - name: Configure firewall for HTTP/HTTPS
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "80"
+        - "443"
+      when: ansible_os_family == "Debian"
+
+    - name: Configure firewall for HTTP/HTTPS (firewalld)
+      firewalld:
+        service: "{{ item }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop:
+        - http
+        - https
+      when: ansible_os_family == "RedHat"
+
+    - name: Display access information
+      debug:
+        msg:
+          - "Nginx reverse proxy configured successfully!"
+          - "Grafana URL: https://{{ grafana_domain }}"
+          - "Backend: {{ grafana_backend }}"
+          - "SSL: {{ 'Enabled with LetsEncrypt' if enable_letsencrypt else 'Configure manually' }}"
+
+  handlers:
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded

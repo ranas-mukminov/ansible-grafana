@@ -1,0 +1,113 @@
+---
+version: '3.8'
+
+services:
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+
+    # Ports
+    ports:
+      - "3000:3000"
+
+    # Environment variables
+    environment:
+      # Security
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-changeme}
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY}
+
+      # Server
+      - GF_SERVER_ROOT_URL=https://grafana.example.com
+      - GF_SERVER_DOMAIN=grafana.example.com
+
+      # Database (using PostgreSQL for HA)
+      # Uncomment to use external database
+      # - GF_DATABASE_TYPE=postgres
+      # - GF_DATABASE_HOST=postgres:5432
+      # - GF_DATABASE_NAME=grafana
+      # - GF_DATABASE_USER=grafana
+      # - GF_DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+
+      # Install plugins
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-clock-panel
+
+      # Anonymous access (optional)
+      # - GF_AUTH_ANONYMOUS_ENABLED=true
+      # - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+
+    # Volumes
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning
+      - ./dashboards:/var/lib/grafana/dashboards
+
+    # Networks
+    networks:
+      - monitoring
+
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits (optional but recommended)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Optional: PostgreSQL for production use
+  postgres:
+    image: postgres:15-alpine
+    container_name: grafana-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=grafana
+      - POSTGRES_USER=grafana
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grafana"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Redis for session storage and caching (HA setup)
+  redis:
+    image: redis:7-alpine
+    container_name: grafana-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - monitoring
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  grafana-storage:
+    driver: local
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge
