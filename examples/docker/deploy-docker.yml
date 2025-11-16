@@ -1,0 +1,110 @@
+---
+# Ansible playbook to deploy Grafana using Docker Compose
+#
+# Usage: ansible-playbook -i inventory deploy-docker.yml
+
+- name: Deploy Grafana with Docker Compose
+  hosts: grafana_servers
+  become: true
+
+  vars:
+    grafana_docker_dir: /opt/grafana
+    grafana_admin_password: "{{ vault_grafana_password }}"
+    postgres_password: "{{ vault_postgres_password }}"
+    grafana_secret_key: "{{ vault_grafana_secret_key }}"
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - docker.io
+          - docker-compose
+          - python3-docker
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install Docker on RedHat-based systems
+      yum:
+        name:
+          - docker
+          - docker-compose
+          - python3-docker
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Ensure Docker is started and enabled
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Create Grafana directory
+      file:
+        path: "{{ grafana_docker_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create provisioning directories
+      file:
+        path: "{{ grafana_docker_dir }}/{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - provisioning/datasources
+        - provisioning/dashboards
+        - provisioning/notifiers
+        - dashboards
+
+    - name: Copy docker-compose file
+      template:
+        src: docker-compose.yml.j2
+        dest: "{{ grafana_docker_dir }}/docker-compose.yml"
+        mode: '0644'
+
+    - name: Create .env file with secrets
+      template:
+        src: .env.j2
+        dest: "{{ grafana_docker_dir }}/.env"
+        mode: '0600'
+      no_log: true
+
+    - name: Copy provisioning configurations
+      copy:
+        src: "{{ item.src }}"
+        dest: "{{ grafana_docker_dir }}/{{ item.dest }}"
+        mode: '0644'
+      loop:
+        - { src: 'provisioning/datasources/', dest: 'provisioning/datasources/' }
+        - { src: 'provisioning/dashboards/', dest: 'provisioning/dashboards/' }
+      when: item.src is exists
+
+    - name: Pull Grafana Docker images
+      community.docker.docker_compose:
+        project_src: "{{ grafana_docker_dir }}"
+        pull: true
+      register: output
+
+    - name: Start Grafana containers
+      community.docker.docker_compose:
+        project_src: "{{ grafana_docker_dir }}"
+        state: present
+        recreate: smart
+      register: output
+
+    - name: Wait for Grafana to be ready
+      uri:
+        url: "http://localhost:3000/api/health"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Display Grafana access information
+      debug:
+        msg:
+          - "Grafana is now running!"
+          - "Access URL: http://{{ ansible_host }}:3000"
+          - "Username: admin"
+          - "Password: {{ grafana_admin_password }}"

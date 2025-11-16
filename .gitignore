@@ -5,3 +5,42 @@
 __pycache__/
 .pytest_cache
 .tox
+.ansible/
+
+# Backup artifacts
+/backup/
+*.tar.gz
+*.sql
+*.db.backup
+
+# Environment files
+.env
+*.env
+
+# Temporary files
+/tmp/
+*.tmp
+*.swp
+*~
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Secrets and credentials
+vault.yml
+secrets.yml
+*.key
+*.pem
+*.crt
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
