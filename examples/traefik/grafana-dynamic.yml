@@ -1,0 +1,68 @@
+---
+# Traefik dynamic configuration for Grafana
+# Place this in your Traefik dynamic configuration directory
+# (e.g., /etc/traefik/dynamic/ or specify in traefik.yml)
+
+http:
+  routers:
+    grafana:
+      rule: "Host(`grafana.example.com`)"
+      entryPoints:
+        - websecure
+      service: grafana-service
+      tls:
+        certResolver: letsencrypt
+      middlewares:
+        - grafana-headers
+        - grafana-ratelimit
+
+    # Separate router for WebSocket support
+    grafana-ws:
+      rule: "Host(`grafana.example.com`) && PathPrefix(`/api/live/`)"
+      entryPoints:
+        - websecure
+      service: grafana-service
+      tls:
+        certResolver: letsencrypt
+
+    # HTTP to HTTPS redirect
+    grafana-redirect:
+      rule: "Host(`grafana.example.com`)"
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: grafana-service
+
+  services:
+    grafana-service:
+      loadBalancer:
+        servers:
+          - url: "http://localhost:3000"
+        healthCheck:
+          path: /api/health
+          interval: 30s
+          timeout: 5s
+
+  middlewares:
+    grafana-headers:
+      headers:
+        customResponseHeaders:
+          X-Frame-Options: "SAMEORIGIN"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+          Referrer-Policy: "no-referrer-when-downgrade"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+    grafana-ratelimit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1s
+
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
